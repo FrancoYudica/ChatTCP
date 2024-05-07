@@ -1,0 +1,9 @@
+{
+    "files.associations": {
+        "clients_registry.h": "c",
+        "pthread.h": "c",
+        "inet.h": "c",
+        "thread-shared-types.h": "c",
+        "system_error": "c"
+    }
+}
