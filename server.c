@@ -6,7 +6,6 @@
 
 int server_port = 8000;
 int sockfd;
-pthread_t client_threads[MAX_CLIENTS];
 pthread_mutex_t thread_mutex;
 
 void send_to_client(const char* buffer, const Client* client)
@@ -32,29 +31,28 @@ void broadcast_message(const char* message, const Client* sender, int echo_to_se
     }
 }
 
+void on_client_disconnect(Client* client)
+{
+    char message[BUFFER_SIZE];
+    sprintf(message, "SERVER: Client (%s) (%s) disconnected\n", client->name, client->ip);
+    printf("%s\n", message);
+    broadcast_message(message, client, 0);
+    unregister_client(client);
+}
+
 void process_command(const char* buffer, Client* client)
 {
 
     // Client disconnected
     if (prefix(buffer, COMMAND_DISCONNECT))
     {
-        char message[BUFFER_SIZE];
-        sprintf(message, "SERVER: Client (%s) (%s) disconnected\n", client->name, client->ip);
-        printf("%s\n", message);
-        broadcast_message(message, client, 0);
-        unregister_client(client);
-    }
-    else if (prefix(buffer, COMMAND_LOGOUT))
-    {
-        printf("Client %i ip: %s logged out\n", client->id, client->ip);
-        unregister_client(client);
+        on_client_disconnect(client);
     }
     else if (prefix(buffer, COMMAND_USERNAME))
     {
         if (!strcmp(buffer, COMMAND_USERNAME))
         {
             char msg[256];  
-            printf("Returning name\n");
             sprintf(msg, "SERVER: Your name is %s", client->name);
             send_to_client(msg, client);
         }
@@ -64,7 +62,7 @@ void process_command(const char* buffer, Client* client)
             char* new_name = remove_prefix(strlen("/username "), buffer);
 
             char message[BUFFER_SIZE];
-            sprintf(message, "SERVER: Successfully changed name %s to %s", client->name, new_name);
+            sprintf(message, "SERVER: Client (%s) (%s) changed name to (%s)", client->name, client->ip, new_name);
             client->name = new_name;
 
             // Broadcasts to all clients
@@ -86,7 +84,7 @@ void process_command(const char* buffer, Client* client)
         }
     }
     else
-        printf("Tried to use unrecognized command in message: %s", buffer);
+        printf("SERVER: Tried to use unrecognized command in message: %s", buffer);
 }
 
 
@@ -109,7 +107,8 @@ void* handle_client(void* args)
         // Connection closed by the peer
         if (bytes_read == 0)
         {
-            printf("Connection closed by client\n");
+            on_client_disconnect(client);
+            pthread_mutex_unlock(&thread_mutex);
             return NULL;
         }
         // Data successfully read from the socket
@@ -118,7 +117,7 @@ void* handle_client(void* args)
 
             read_buffer[bytes_read] = '\0';
 
-            DEBUG_LOG("Client (%i)  (%s) with IP (%s) sent %i bytes\n", client->id, client->name, client->ip, bytes_read);
+            DEBUG_LOG("SERVER: Client (%i)  (%s) with IP (%s) sent %i bytes\n", client->id, client->name, client->ip, bytes_read);
 
 
             // Command
@@ -197,9 +196,10 @@ int main(int argc, char** argv)
         exit(EXIT_FAILURE);
     }
 
-    printf("Server listening. Waiting for messages...\n");
+    printf("SERVER: Listening. Waiting for client connections...\n");
 
     char welcome_message[] = "Welcome! You successfully connected to the server";
+
 
     // Continuous loop to receive and send messages
     while (1) {
@@ -221,10 +221,22 @@ int main(int argc, char** argv)
 
         // Gets client
         Client* client = create_client((const struct sockaddr_in*)&client_address, client_sock_fd);
+
+        // Welcomes client
         send_to_client(welcome_message, client);
 
-        pthread_t* thread = &client_threads[client_count];
-        int rc = pthread_create(thread, NULL, &handle_client, client);
+        // Tells other clients that a new client connected
+        {
+            char clients_notification[BUFFER_SIZE];
+            sprintf(clients_notification, "SERVER: Client (%s) (%s) connected", client->name, client->ip);
+            broadcast_message(clients_notification, client, 0);
+            printf("%s\n", clients_notification);
+        }
+
+
+        // Creates thread to handle client connection
+        pthread_t thread;
+        int rc = pthread_create(&thread, NULL, &handle_client, client);
         if (rc)
         {
             perror("Thread create");

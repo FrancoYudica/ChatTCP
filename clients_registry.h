@@ -45,8 +45,6 @@ Client* create_client(const struct sockaddr_in* client_address, int client_sock_
     }
 
     char* ip = inet_ntoa(client_address->sin_addr);
-    printf("Client (%i) ip: (%s) logged in!\n", client_count, ip);
-    
     // Sets client data
     client->address = *client_address;
     client->ip = ip;
